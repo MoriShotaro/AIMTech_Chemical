@@ -33,7 +33,7 @@ odir <- paste0(root,'/output/GEER/plot/')
 
 cpol <- c('Baseline','NPi500','NPi700','NPi1000')
 # cpol <- c('Baseline','NPi500','NPi600','NPi700','NPi800','NPi900','NPi1000')
-techpol <- c('Default','limCCS','limBio')
+techpol <- c('Default','limCCS','limBio','H2low')
 # techpol <- c('Default','Biofueloff','limCCS')
 
 list_Sc <- expand.grid(cpol=cpol,techpol=techpol) %>% 
@@ -84,9 +84,23 @@ gas_t1 <- foreach(i=Sc,.combine='rbind') %do% {
     mutate(H=as.numeric(H)) %>% 
     mutate(Sc=i) %>% 
     filter(I=='NEN')
-} %>% bind_rows() %>% 
-  distinct(K,gas_t1)
+} %>% bind_rows()
 
+ele_emf <- foreach(i=techpol,.combine='rbind') %do% {
+  tmp <- rgdx.param(paste0(ddir,i,'/merged_output.gdx'),'data_all') %>% 
+    filter(Sv%in%c('Sec_Ene_Ele','Emi_CO2_Ene_Sup_Ele')) %>% 
+    mutate(across(where(is.factor),~as.character(.))) %>% 
+    mutate(Sy=as.numeric(Sy)) %>% 
+    pivot_wider(names_from=Sv,values_from=data_all) %>% 
+    mutate(gas_t1=Emi_CO2_Ene_Sup_Ele/Sec_Ene_Ele) %>% # Mt-CO2/EJ -> kt-CO2/PJ
+    select(Sc,Sr,Sy,gas_t1) %>%
+    mutate(K='ELYI',I='NEN',M='CO2e') %>% 
+    rename(R=Sr,H=Sy) %>% select(R,I,K,M,H,gas_t1,Sc)
+} %>% bind_rows()
+
+gas_t <- bind_rows(gas_t1,ele_emf) %>% 
+  group_by(R,I,K,M,H,Sc) %>% 
+  summarise(gas_t1=mean(gas_t1))
 
 # Model -------------------------------------------------------------------
 
@@ -120,7 +134,7 @@ VX1 <- vx_l %>%
                       str_detect(L,'GAS')~'Oil product (Ethane)')) %>% 
   mutate(J=factor(J,levels=c('HVC','MOH','NH3U','NH3')),
          J2=factor(J2,levels=c('HVC','Methanol','Ammonia')),
-         F2=factor(F,levels=c('Electrolysis',
+         F2=factor(F2,levels=c('Electrolysis',
                               'Biomass w/ CCS',
                               'Biomass w/o CCS',
                               'Natural gas w/ CCS',
@@ -169,7 +183,7 @@ VX5 <- vx_l %>%
                       str_detect(L,'GAS')~'Oil product (Ethane)')) %>% 
   mutate(J=factor(J,levels=c('HVC','MOH','NH3U','NH3')),
          J2=factor(J2,levels=c('HVC','Methanol','Ammonia')),
-         F2=factor(F,levels=c('Electrolysis',
+         F2=factor(F2,levels=c('Electrolysis',
                               'Biomass w/ CCS',
                               'Biomass w/o CCS',
                               'Natural gas w/ CCS',
@@ -195,11 +209,12 @@ VE1 <- vx_l %>%
                       str_detect(K,'OIL')~'Oil product',
                       str_detect(K,'COL')~'Coal',
                       str_detect(K,'OLN')~'Oil product (Naphtha)',
-                      str_detect(K,'OLE')~'Oil product (Ethane)')) %>%
+                      str_detect(K,'OLE')~'Oil product (Ethane)')) %>% 
   mutate(E=case_when(str_detect(K,'.{3}F')~'Feedstock',
                      str_detect(K,'.{3}S')~'Feedstock',
                      str_detect(K,'.{3}P')~'Process',
                      str_detect(K,'.{3}C')~'CCUS',
+                     str_detect(K,'ELY')~'Electricity (indirect)',
                      TRUE~'Energy')) %>% 
   mutate(J=case_when(str_detect(L,'HVC')~'HVC',
                      str_detect(L,'MOH')~'MOH',
@@ -210,7 +225,7 @@ VE1 <- vx_l %>%
                       str_detect(L,'NH3')~'Ammonia')) %>% 
   mutate(J=factor(J,levels=c('HVC','MOH','NH3U','NH3')),
          J2=factor(J2,levels=c('HVC','Methanol','Ammonia')),
-         E=factor(E,levels=c('Feedstock','CCUS','Process','Energy')),
+         E=factor(E,levels=c('Feedstock','Electricity (indirect)','CCUS','Process','Energy')),
          K2=factor(K2,levels=c('Electricity',
                                'Liquid biomass',
                                'Solid biomass',
@@ -241,6 +256,7 @@ VE5 <- VE1 %>%
                      str_detect(K,'.{3}S')~'Feedstock',
                      str_detect(K,'.{3}P')~'Process',
                      str_detect(K,'.{3}C')~'CCUS',
+                     str_detect(K,'ELY')~'Electricity (indirect)',
                      TRUE~'Energy')) %>% 
   mutate(J=case_when(str_detect(L,'HVC')~'HVC',
                      str_detect(L,'MOH')~'MOH',
@@ -251,7 +267,7 @@ VE5 <- VE1 %>%
                       str_detect(L,'NH3')~'Ammonia')) %>% 
   mutate(J=factor(J,levels=c('HVC','MOH','NH3U','NH3')),
          J2=factor(J2,levels=c('HVC','Methanol','Ammonia')),
-         E=factor(E,levels=c('Feedstock','CCUS','Process','Energy')),
+         E=factor(E,levels=c('Feedstock','Electricity (indirect)','CCUS','Process','Energy')),
          K2=factor(K2,levels=c('Electricity',
                                'Liquid biomass',
                                'Solid biomass',
@@ -262,10 +278,15 @@ VE5 <- VE1 %>%
                                'Coal'))) %>% 
   left_join(list_Sc)
 
-VQ1 <- VE1 %>% 
-  left_join(gas_t1) %>% 
+VQ1 <- vx_l %>%
+  left_join(e_t) %>%
+  filter(!str_detect(L,'NEN|SC_L_'),!str_detect(K,'CCO2')) %>% 
+  mutate(ve_l=-vx_l*e_t) %>% 
+  left_join(gas_t) %>% 
   filter(gas_t1>0) %>% 
   mutate(vq_l=ve_l*gas_t1/10^3) %>% # kt -> Mt
+  group_by(L,H,Sc,K) %>% 
+  summarise(vq_l=sum(vq_l)) %>% 
   select(L,H,Sc,K,vq_l) %>% 
   mutate(J=case_when(str_detect(L,'HVC')~'HVC',
                      str_detect(L,'MOH')~'MOH',
@@ -278,6 +299,7 @@ VQ1 <- VE1 %>%
                      str_detect(K,'.{3}S')~'Feedstock',
                      str_detect(K,'.{3}P')~'Process',
                      str_detect(K,'.{3}C')~'CCUS',
+                     str_detect(K,'ELY')~'Electricity (indirect)',
                      TRUE~'Energy')) %>% 
   mutate(K2=case_when(str_detect(K,'BMS')~'Liquid biomass',
                       str_detect(K,'CRN')~'Solid biomass',
@@ -289,7 +311,7 @@ VQ1 <- VE1 %>%
                       str_detect(K,'OLE')~'Oil product (Ethane)')) %>% 
   mutate(J=factor(J,levels=c('HVC','MOH','NH3U','NH3')),
          J2=factor(J2,levels=c('HVC','Methanol','Ammonia')),
-         E=factor(E,levels=c('Feedstock','CCUS','Process','Energy')),
+         E=factor(E,levels=c('Feedstock','Electricity (indirect)','CCUS','Process','Energy')),
          K2=factor(K2,levels=c('Electricity',
                                'Liquid biomass',
                                'Solid biomass',
@@ -315,8 +337,10 @@ VQ5 <- VQ1 %>%
                       str_detect(L,'MOH')~'Methanol',
                       str_detect(L,'NH3')~'Ammonia')) %>% 
   mutate(E=case_when(str_detect(K,'.{3}F')~'Feedstock',
+                     str_detect(K,'.{3}S')~'Feedstock',
                      str_detect(K,'.{3}P')~'Process',
                      str_detect(K,'.{3}C')~'CCUS',
+                     str_detect(K,'ELY')~'Electricity (indirect)',
                      TRUE~'Energy')) %>% 
   mutate(K2=case_when(str_detect(K,'BMS')~'Liquid biomass',
                       str_detect(K,'CRN')~'Solid biomass',
@@ -328,7 +352,7 @@ VQ5 <- VQ1 %>%
                       str_detect(K,'OLE')~'Oil product (Ethane)')) %>% 
   mutate(J=factor(J,levels=c('HVC','MOH','NH3U','NH3')),
          J2=factor(J2,levels=c('HVC','Methanol','Ammonia')),
-         E=factor(E,levels=c('Feedstock','CCUS','Process','Energy')),
+         E=factor(E,levels=c('Feedstock','Electricity (indirect)','CCUS','Process','Energy')),
          K2=factor(K2,levels=c('Electricity',
                                'Liquid biomass',
                                'Solid biomass',
@@ -338,6 +362,14 @@ VQ5 <- VQ1 %>%
                                'Oil product',
                                'Coal'))) %>% 
   left_join(list_Sc)
+
+g <- VQ5 %>% 
+  group_by(Sc,Y5) %>% 
+  summarise(vq_l=sum(vq_l))
+
+g <- VQ1 %>% 
+  group_by(Sc,H) %>% 
+  summarise(vq_l=sum(vq_l))
 
 
 # Plot theme --------------------------------------------------------------
@@ -372,57 +404,89 @@ emission_historical <- data.frame(H=c(2010,2015,2020),
                                   MOH=c(76.84,159.28,225.56),
                                   HVC=c(190.14,219.07,248.30)) %>% mutate(TOTAL=HVC+MOH+NH3)
 
+# IEA, 2022 Energy-related CO2 emissions from chemical sector
+emission_historical_chem_e <- read_csv(paste0(root,'/data/GEER/historical/Emission/IEA_GHG_Energy_2022.csv')) %>% 
+  slice(10) %>% 
+  pivot_longer(cols=-c(TIME),names_to='H',names_transform=as.numeric,values_to='value') %>% 
+  select(H,value) %>% filter(H>=2005)
+
+# EDGAR, 2022 Process CO2 emissions from chemical sector
+emission_historical_chem_p <- rgdx.param(paste0(root,'/data/GEER/historical/Emission/edgar2.gdx'),'Pedgar60')
+
 # Total
-g_emi_J <- VQ1 %>% 
+g_emi_E <- VQ1 %>% 
   filter(H<=2020,Sc=='Baseline') %>% 
   ggplot() +
-  geom_bar(aes(x=H,y=vq_l,fill=E),stat='identity') +
-  geom_point(data=emission_historical,aes(x=H,y=TOTAL),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
+  geom_bar(aes(x=H,y=vq_l/1000,fill=E),stat='identity') +
+  geom_point(data=emission_historical,aes(x=H,y=TOTAL/1000),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
   scale_fill_brewer(palette='Set3') +
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
-  labs(y='Emission from primary chemical production (MtCO2/yr)') +
-  MyTheme
+  labs(y='Emission from primary chemical production (GtCO2/yr)',
+       title='Emission from primary chemical production (IEA, 2022)') +
+  MyTheme +
+  theme(legend.position = 'bottom')
+plot(g_emi_E)
+ggsave(paste0(odir,'historical/emission_total_E.png'),width=6,height=7,g_emi_E)
+
+# Total
+g_emi_J <- VQ1 %>% 
+  filter(H<=2020,Sc=='Baseline',E%in%c('Energy','Process')) %>% 
+  ggplot() +
+  geom_bar(aes(x=H,y=vq_l/1000,fill=J2),stat='identity') +
+  geom_point(data=emission_historical,aes(x=H,y=TOTAL/1000),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
+  scale_fill_brewer(palette='Set3') +
+  facet_grid(cols=vars(cpol),rows=vars(techpol)) +
+  labs(y='Emission from primary chemical production (GtCO2/yr)',
+       title='Emission from primary chemical production (IEA, 2022)') +
+  MyTheme +
+  theme(legend.position = 'bottom')
 plot(g_emi_J)
-ggsave(paste0(odir,'historical/emission_total.png'),g_emi_J)
+ggsave(paste0(odir,'historical/emission_total.png'),width=6,height=7,g_emi_J)
 
 # HVC 2005 - 2020
 g_emi_HVC <- VQ1 %>% 
   filter(H<=2020,J2=='HVC',Sc=='Baseline') %>% 
   ggplot() +
-  geom_bar(aes(x=H,y=vq_l,fill=E),stat='identity') +
-  geom_point(data=emission_historical,aes(x=H,y=HVC),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
+  geom_bar(aes(x=H,y=vq_l/1000,fill=E),stat='identity') +
+  geom_point(data=emission_historical,aes(x=H,y=HVC/1000),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
   scale_fill_brewer(palette='Set3') +
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
-  labs(y='Emission from HVC production (MtCO2/yr)') +
-  MyTheme
+  labs(y='Emission from HVC production (GtCO2/yr)',
+       title='Emission from HVC production (IEA, 2022)') +
+  MyTheme +
+  theme(legend.position = 'bottom')
 plot(g_emi_HVC)
-ggsave(paste0(odir,'historical/emission_HVC.png'),g_emi_HVC)
+ggsave(paste0(odir,'historical/emission_HVC.png'),width=6,height=7,g_emi_HVC)
 
 # Ammonia 2005 - 2020
 g_emi_NH3 <- VQ1 %>% 
   filter(H<=2020,J2=='Ammonia',Sc=='Baseline') %>% 
   ggplot() +
-  geom_bar(aes(x=H,y=vq_l,fill=E),stat='identity') +
-  geom_point(data=emission_historical,aes(x=H,y=NH3),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
+  geom_bar(aes(x=H,y=vq_l/1000,fill=E),stat='identity') +
+  geom_point(data=emission_historical,aes(x=H,y=NH3/1000),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
   scale_fill_brewer(palette='Set3') +
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
-  labs(y='Emission from ammonia production (MtCO2/yr)') +
-  MyTheme
+  labs(y='Emission from ammonia production (GtCO2/yr)',
+       title='Emission from Ammonia production (IEA, 2022)') +
+  MyTheme +
+  theme(legend.position = 'bottom')
 plot(g_emi_NH3)
-ggsave(paste0(odir,'historical/emission_NH3.png'),g_emi_NH3)
+ggsave(paste0(odir,'historical/emission_NH3.png'),width=6,height=7,g_emi_NH3)
 
 # Methanol 2005 - 2020
 g_emi_MOH <- VQ1 %>% 
   filter(H<=2020,J2=='Methanol',Sc=='Baseline') %>% 
   ggplot() +
-  geom_bar(aes(x=H,y=vq_l,fill=E),stat='identity') +
-  geom_point(data=emission_historical,aes(x=H,y=MOH),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
+  geom_bar(aes(x=H,y=vq_l/1000,fill=E),stat='identity') +
+  geom_point(data=emission_historical,aes(x=H,y=MOH/1000),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
   scale_fill_brewer(palette='Set3') +
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
-  labs(y='Emission from methanol production (MtCO2/yr)') +
-  MyTheme
+  labs(y='Emission from methanol production (GtCO2/yr)',
+       title='Emission from Methanol production (IEA, 2022)') +
+  MyTheme +
+  theme(legend.position = 'bottom')
 plot(g_emi_MOH)
-ggsave(paste0(odir,'historical/emission_MOH.png'),g_emi_MOH)
+ggsave(paste0(odir,'historical/emission_MOH.png'),width=6,height=7,g_emi_MOH)
 
 
 # Production 2005 - 2020---------------------------------------------------
@@ -441,10 +505,12 @@ g_pro_HVC_h <- VX1 %>%
   geom_point(data=NEDO_HVC,aes(x=Y,y=value/1000),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
   scale_fill_brewer(palette='Set3') +
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
-  labs(y='HVC production (Mt/yr)') +
-  MyTheme
+  labs(y='HVC production (Mt/yr)',
+       title='HVC production (NEDO)') +
+  MyTheme +
+  theme(legend.position = 'bottom')
 plot(g_pro_HVC_h)
-ggsave(paste0(odir,'historical/production_HVC.png'),g_pro_HVC_h)
+ggsave(paste0(odir,'historical/production_HVC.png'),width=6,height=7,g_pro_HVC_h)
 
 # NH3 2005 - 2020
 g_pro_NH3_h <- VX1 %>%
@@ -455,10 +521,12 @@ g_pro_NH3_h <- VX1 %>%
   geom_point(data=USGS_NH3,aes(x=Year,y=value),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
   scale_fill_brewer(palette='Set3') +
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
-  labs(y='Ammonia production (Mt/yr)') +
-  MyTheme
+  labs(y='Ammonia production (Mt/yr)',
+       title='Ammonia production (USGS)') +
+  MyTheme +
+  theme(legend.position = 'bottom')
 plot(g_pro_NH3_h)
-ggsave(paste0(odir,'historical/production_NH3.png'),g_pro_NH3_h)
+ggsave(paste0(odir,'historical/production_NH3.png'),width=6,height=7,g_pro_NH3_h)
 
 # MOH 2005 - 2020
 g_pro_MOH_h <- VX1 %>%
@@ -469,10 +537,12 @@ g_pro_MOH_h <- VX1 %>%
   geom_point(data=MMSA_MOH,aes(x=Y,y=value/1000),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
   scale_fill_brewer(palette='Set3') +
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
-  labs(y='Methanol production (Mt/yr)') +
-  MyTheme
+  labs(y='Methanol production (Mt/yr)',
+       title='Methanol production (MMSA)') +
+  MyTheme +
+  theme(legend.position = 'bottom')
 plot(g_pro_MOH_h)
-ggsave(paste0(odir,'historical/production_MOH.png'),g_pro_MOH_h)
+ggsave(paste0(odir,'historical/production_MOH.png'),width=6,height=7,g_pro_MOH_h)
 
 
 # Energy consumption 2005 - 2020 ------------------------------------------
@@ -494,7 +564,7 @@ g_ene_K <- VE1 %>%
        title='Total energy consumption for primary chemical production') +
   MyTheme
 plot(g_ene_K)
-ggsave(paste0(odir,'historical/energy_total_K.png'),g_ene_K)
+ggsave(paste0(odir,'historical/energy_total_K.png'),g_ene_K,width=6,height=7)
 
 # Feedstock energy
 g_ene_K <- VE1 %>%
@@ -507,11 +577,11 @@ g_ene_K <- VE1 %>%
        title='Feedstock energy consumption for primary chemical production') +
   MyTheme
 plot(g_ene_K)
-ggsave(paste0(odir,'historical/energy_feedstock_K.png'),g_ene_K)
+ggsave(paste0(odir,'historical/energy_feedstock_K.png'),g_ene_K,width=6,height=7)
 
 # Process energy
 g_ene_p_K <- VE1 %>%
-  filter(H<=2020,Sc=='Baseline',E=='Energy') %>% 
+  filter(H<=2020,Sc=='Baseline',E%in%c('Energy','Electricity (indirect)')) %>% 
   ggplot() +
   geom_bar(aes(x=H,y=ve_l/1000,fill=K2),stat='identity') +
   geom_point(data=proene_historical,aes(x=H,y=value),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
@@ -521,7 +591,7 @@ g_ene_p_K <- VE1 %>%
        title='Process energy consumption for primary chemical production') +
   MyTheme
 plot(g_ene_p_K)
-ggsave(paste0(odir,'energy/energy_process_K.png'),g_ene_p_K)
+ggsave(paste0(odir,'historical/energy_process_K.png'),g_ene_p_K,width=6,height=7)
 
 
 # Production 2020 - 2050 --------------------------------------------------
@@ -535,9 +605,10 @@ g_pro_HVC <- VX5 %>%
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
   labs(y='HVC production (Mt/yr)',
        title='HVC production') +
-  MyTheme
+  MyTheme +
+  theme(legend.position = 'bottom')
 plot(g_pro_HVC)
-ggsave(paste0(odir,'production/production_HVC.png'),g_pro_HVC)
+ggsave(paste0(odir,'production/production_HVC.png'),g_pro_HVC,width=10,height=8)
 
 # NH3 2020 - 2050
 g_pro_NH3 <- VX5 %>%
@@ -548,9 +619,10 @@ g_pro_NH3 <- VX5 %>%
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
   labs(y='Ammonia production (Mt/yr)',
        title='Ammonia production') +
-  MyTheme
+  MyTheme +
+  theme(legend.position = 'bottom')
 plot(g_pro_NH3)
-ggsave(paste0(odir,'production/production_NH3.png'),g_pro_NH3)
+ggsave(paste0(odir,'production/production_NH3.png'),g_pro_NH3,width=10,height=8)
 
 # MOH 2020 - 2050
 g_pro_MOH <- VX5 %>%
@@ -561,9 +633,10 @@ g_pro_MOH <- VX5 %>%
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
   labs(y='Methanol production (Mt/yr)',
        title='Methanol production') +
-  MyTheme
+  MyTheme +
+  theme(legend.position = 'bottom')
 plot(g_pro_MOH)
-ggsave(paste0(odir,'production/production_MOH.png'),g_pro_MOH)
+ggsave(paste0(odir,'production/production_MOH.png'),g_pro_MOH,width=10,height=8)
 
 
 # Emission 2020 - 2050 ----------------------------------------------------
@@ -572,66 +645,66 @@ ggsave(paste0(odir,'production/production_MOH.png'),g_pro_MOH)
 g_emi_E <- VQ5 %>% 
   filter(K!='CRN',E!='CCUS') %>% 
   ggplot() +
-  geom_bar(aes(x=Y5,y=vq_l,fill=E),stat='identity') +
+  geom_bar(aes(x=Y5,y=vq_l/1000,fill=E),stat='identity') +
   scale_fill_brewer(palette='Set3') +
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
-  labs(y='Emission from primary chemical production (MtCO2/yr)',
+  labs(y='Emission from primary chemical production (GtCO2/yr)',
        title='Emission from primary chemical production by source') +
   MyTheme
 plot(g_emi_E)
-ggsave(paste0(odir,'emission/emission_total_E.png'),g_emi_E)
+ggsave(paste0(odir,'emission/emission_total_E.png'),g_emi_E,width=10,height=8)
 
 # Total -product
 g_emi_J <- VQ5 %>% 
   filter(E!='CCUS',K!='CRN') %>% 
   ggplot() +
-  geom_bar(aes(x=Y5,y=vq_l,fill=J2),stat='identity') +
+  geom_bar(aes(x=Y5,y=vq_l/1000,fill=J2),stat='identity') +
   scale_fill_brewer(palette='Set3') +
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
-  labs(y='Emission from primary chemical production (MtCO2/yr)',
+  labs(y='Emission from primary chemical production (GtCO2/yr)',
        title='Emission from primary chemical production by product') +
   MyTheme
 plot(g_emi_J)
-ggsave(paste0(odir,'emission/emission_total_J.png'),g_emi_J)
+ggsave(paste0(odir,'emission/emission_total_J.png'),g_emi_J,width=10,height=8)
 
 # HVC 2005 - 2050
 g_emi_HVC <- VQ5 %>% 
   filter(J2=='HVC',E!='CCUS',K!='CRN') %>% 
   ggplot() +
-  geom_bar(aes(x=Y5,y=vq_l,fill=E),stat='identity') +
+  geom_bar(aes(x=Y5,y=vq_l/1000,fill=E),stat='identity') +
   scale_fill_brewer(palette='Set3') +
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
-  labs(y='Emission from HVC production (MtCO2/yr)',
+  labs(y='Emission from HVC production (GtCO2/yr)',
        title='Emission from HVC production by source') +
   MyTheme
 plot(g_emi_HVC)
-ggsave(paste0(odir,'emission/emission_HVC.png'),g_emi_HVC)
+ggsave(paste0(odir,'emission/emission_HVC.png'),g_emi_HVC,width=10,height=8)
 
 # Ammonia 2020 - 2050
 g_emi_NH3 <- VQ5 %>% 
   filter(J2=='Ammonia',E!='CCUS',K!='CRN') %>% 
   ggplot() +
-  geom_bar(aes(x=Y5,y=vq_l,fill=E),stat='identity') +
+  geom_bar(aes(x=Y5,y=vq_l/1000,fill=E),stat='identity') +
   scale_fill_brewer(palette='Set3') +
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
-  labs(y='Emission from ammonia production (MtCO2/yr)',
+  labs(y='Emission from ammonia production (GtCO2/yr)',
        title='Emission from Ammonia production by source') +
   MyTheme
 plot(g_emi_NH3)
-ggsave(paste0(odir,'emission/emission_NH3.png'),g_emi_NH3)
+ggsave(paste0(odir,'emission/emission_NH3.png'),g_emi_NH3,width=10,height=8)
 
 # Methanol 2020 - 2050
 g_emi_MOH <- VQ5 %>% 
   filter(J2=='Methanol',E!='CCUS',K!='CRN') %>% 
   ggplot() +
-  geom_bar(aes(x=Y5,y=vq_l,fill=E),stat='identity') +
+  geom_bar(aes(x=Y5,y=vq_l/1000,fill=E),stat='identity') +
   scale_fill_brewer(palette='Set3') +
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
-  labs(y='Emission from methanol production (MtCO2/yr)',
+  labs(y='Emission from methanol production (GtCO2/yr)',
        title='Emission from Methanol production by source') +
   MyTheme
 plot(g_emi_MOH)
-ggsave(paste0(odir,'emission/emission_MOH.png'),g_emi_MOH)
+ggsave(paste0(odir,'emission/emission_MOH.png'),g_emi_MOH,width=10,height=8)
 
 
 # Energy consumption ------------------------------------------------------
@@ -646,7 +719,7 @@ g_ene_E <- VE5 %>%
        title='Total energy consumption for primary chemical production') +
   MyTheme
 plot(g_ene_E)
-ggsave(paste0(odir,'energy/energy_total_E.png'),g_ene_E)
+ggsave(paste0(odir,'energy/energy_total_E.png'),g_ene_E,width=10,height=8)
 
 # Total -product
 g_ene_J <- VE5 %>%
@@ -658,7 +731,7 @@ g_ene_J <- VE5 %>%
        title='Total energy consumption for primary chemical production by product') +
   MyTheme
 plot(g_ene_J)
-ggsave(paste0(odir,'energy/energy_total_J.png'),g_ene_J)
+ggsave(paste0(odir,'energy/energy_total_J.png'),g_ene_J,width=10,height=8)
 
 # Total -energy
 g_ene_K <- VE5 %>%
@@ -670,7 +743,7 @@ g_ene_K <- VE5 %>%
        title='Total energy consumption for primary chemical production by energy') +
   MyTheme
 plot(g_ene_K)
-ggsave(paste0(odir,'energy/energy_total_K.png'),g_ene_K)
+ggsave(paste0(odir,'energy/energy_total_K.png'),g_ene_K,width=10,height=8)
 
 # Feedstock -energy
 g_ene_f_K <- VE5 %>%
@@ -683,7 +756,7 @@ g_ene_f_K <- VE5 %>%
        title='Feedstock energy consumption for primary chemical production by energy') +
   MyTheme
 plot(g_ene_f_K)
-ggsave(paste0(odir,'energy/energy_feedstock_K.png'),g_ene_f_K)
+ggsave(paste0(odir,'energy/energy_feedstock_K.png'),g_ene_f_K,width=10,height=8)
 
 # Feedstock -product
 g_ene_f_J <- VE5 %>%
@@ -696,7 +769,7 @@ g_ene_f_J <- VE5 %>%
        title='Feedstock energy consumption for primary chemical production by product') +
   MyTheme
 plot(g_ene_f_J)
-ggsave(paste0(odir,'energy/energy_feedstock_J.png'),g_ene_f_J)
+ggsave(paste0(odir,'energy/energy_feedstock_J.png'),g_ene_f_J,width=10,height=8)
 
 # HVC 2005 - 2050
 g_ene_HVC <- VE5 %>%
@@ -709,7 +782,7 @@ g_ene_HVC <- VE5 %>%
        title='Total energy consumption for HVC production') +
   MyTheme
 plot(g_ene_HVC)
-ggsave(paste0(odir,'energy/energy_feedstock_HVC.png'),g_ene_HVC)
+ggsave(paste0(odir,'energy/energy_HVC.png'),g_ene_HVC,width=10,height=8)
 
 # HVC feedstock 2005 - 2050
 g_ene_f_HVC <- VE5 %>%
@@ -722,7 +795,7 @@ g_ene_f_HVC <- VE5 %>%
        title='Feedstock energy consumption for HVC production') +
   MyTheme
 plot(g_ene_f_HVC)
-ggsave(paste0(odir,'energy/energy_feedstock_HVC.png'),g_ene_f_HVC)
+ggsave(paste0(odir,'energy/energy_feedstock_HVC.png'),g_ene_f_HVC,width=10,height=8)
 
 # NH3 2005 - 2050
 g_ene_NH3 <- VE5 %>%
@@ -735,7 +808,7 @@ g_ene_NH3 <- VE5 %>%
        title='Total energy consumption for Ammonia production') +
   MyTheme
 plot(g_ene_NH3)
-ggsave(paste0(odir,'energy/energy_feedstock_NH3.png'),g_ene_NH3)
+ggsave(paste0(odir,'energy/energy_NH3.png'),g_ene_NH3,width=10,height=8)
 
 # NH3 feedstock 2005 - 2050
 g_ene_f_NH3 <- VE5 %>%
@@ -748,7 +821,7 @@ g_ene_f_NH3 <- VE5 %>%
        title='Feedstock energy consumption for Ammonia production') +
   MyTheme
 plot(g_ene_f_NH3)
-ggsave(paste0(odir,'energy/energy_feedstock_NH3.png'),g_ene_f_NH3)
+ggsave(paste0(odir,'energy/energy_feedstock_NH3.png'),g_ene_f_NH3,width=10,height=8)
 
 # MOH 2005 - 2050
 g_ene_MOH <- VE5 %>%
@@ -761,7 +834,7 @@ g_ene_MOH <- VE5 %>%
        title='Total energy consumption for Methanol production') +
   MyTheme
 plot(g_ene_MOH)
-ggsave(paste0(odir,'energy/energy_feedstock_MOH.png'),g_ene_MOH)
+ggsave(paste0(odir,'energy/energy_MOH.png'),g_ene_MOH,width=10,height=8)
 
 # MOH feedstock 2005 - 2050
 g_ene_f_MOH <- VE5 %>%
@@ -774,4 +847,20 @@ g_ene_f_MOH <- VE5 %>%
        title='Feedstock energy consumption for Methanol production') +
   MyTheme
 plot(g_ene_f_MOH)
-ggsave(paste0(odir,'energy/energy_feedstock_MOH.png'),g_ene_f_MOH)
+ggsave(paste0(odir,'energy/energy_feedstock_MOH.png'),g_ene_f_MOH,width=10,height=8)
+
+
+# Electricity consumption -------------------------------------------------
+
+# Total -flow
+g_ene_E <- VE5 %>%
+  filter(K2=='Electricity') %>% 
+  ggplot() +
+  geom_bar(aes(x=Y5,y=ve_l,fill=E),stat='identity') +
+  scale_fill_brewer(palette='Set3') +
+  facet_grid(cols=vars(cpol),rows=vars(techpol)) +
+  labs(y='Total energy consumption (PJ/yr)',
+       title='Electricity consumption') +
+  MyTheme
+plot(g_ene_E)
+ggsave(paste0(odir,'energy/electricity_total.png'),g_ene_E)

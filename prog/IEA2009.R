@@ -145,7 +145,7 @@ df_demandGDX4 <- df_demand %>%
   filter(Sc=='low'&J%in%c('NEN_HVC','NEN_NH3') | Sc=='high'&J=='NEN_MOH') %>% 
   select(-POP,-R,-value_CAP,-Sc) %>% 
   pivot_wider(names_from=J,values_from=value) %>% rename(NEN_NH3_TOTAL=NEN_NH3) %>% 
-  mutate(NEN_NH3=NEN_NH3_TOTAL*(1-0.55),NEN_NH3U=NEN_NH3_TOTAL*0.55) %>% 
+  mutate(NEN_NH3=NEN_NH3_TOTAL*(1-0.483),NEN_NH3U=NEN_NH3_TOTAL*0.483) %>% 
   select(-NEN_NH3_TOTAL) %>% 
   pivot_longer(cols=-c(R33,Y),names_to='J',values_to='value') %>% 
   mutate(I='NEN') %>% rename(R=R33,H=Y) %>% 
@@ -153,6 +153,25 @@ df_demandGDX4 <- df_demand %>%
   pivot_wider(names_from=H,values_from=value) %>% 
   select(R,I,J,everything())
 wgdx.reshape(df_demandGDX4,symDim=4,symName="serv_t",setsToo=FALSE,gdxName=paste0(odir,'dem_chem_extension.gdx'))
+
+
+
+# Global value adjustment -------------------------------------------------
+
+df_adj <- df_demandGDX4 %>%
+  pivot_longer(cols=-c(R,I,J),names_to='H',values_to='value',names_transform=as.numeric) %>% 
+  group_by(I,J,H) %>% 
+  summarise(value=sum(value))
+
+df_IEA2022 <- data.frame(H=c(2005:2020),
+                         HVC=c(123,129,137,130,131,139,142,144,150,153,159,164,170,177,182,185),
+                         MOH=c(115,124,136,139,145,173,172,186,196,224,245,259,276,292,326,314),
+                         NH3=c(111,113,118,117,116,120,124,127,133,131,135,134,134,137,139,142)) %>% 
+  mutate(HVC=HVC/123,MOH=MOH/115,NH3=NH3/111) %>% 
+  mutate(HVC=HVC*277.61777,MOH=MOH*38.87917,NH3=NH3*(66.64178+81.45107)) %>% 
+  pivot_longer(cols=c(HVC,MOH,NH3),names_to='J',values_to='value') %>% 
+  group_by(H) %>% 
+  summarise(value=sum(value))
 
 # Plot --------------------------------------------------------------------
 
@@ -165,10 +184,12 @@ g <- df_demand %>%
 plot(g)
 
 g <- df_demand %>% 
-  filter(Sc=='low') %>% 
+  filter(Sc=='low') %>%
+  group_by(Y,R33) %>% 
+  summarise(value=sum(value)) %>% 
   ggplot() +
-  geom_area(aes(x=Y,y=value,fill=R33)) +
-  facet_wrap(vars(J))
+  geom_area(data=df_IEA2022,aes(x=H,y=value)) +
+  geom_bar(aes(x=Y,y=value,fill=R33),stat='identity')
 plot(g)
 
 
