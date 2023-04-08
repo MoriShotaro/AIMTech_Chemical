@@ -21,9 +21,9 @@ library(makedummies)
 root <- getwd()
 # ddir <- paste0(root,'/data/GEER/output/global2010/2303270142/gams_output/gdx_primary/')
 # ddir <- paste0(root,'/data/GEER/output/global2050/2303310138/gams_output/gdx_primary/')
-ddir <- paste0(root,'/data/GEER/output/global2050CCU/2304042310/gams_output/gdx_primary/')
-ddir2 <- paste0(root,'/data/GEER/output/global2050CCU/2304042310/main/')
-odir <- paste0(root,'/output/GEER/plot/0405/')
+ddir <- paste0(root,'/data/GEER/output/global2050CCU/2304072249/gams_output/gdx_primary/')
+ddir2 <- paste0(root,'/data/GEER/output/global2050CCU/2304072249/main/')
+odir <- paste0(root,'/output/GEER/plot/0407/')
 
 # R33_R5 <- read.csv(paste0(ddir,'define/R33_R5.csv'),header=FALSE) %>% 
 #   rename(R=1,R5=2)
@@ -487,23 +487,23 @@ emission_historical_chem_p <- rgdx.param(paste0(root,'/data/GEER/historical/Emis
 
 # Total
 Fig2a <- VQ1 %>%
-  filter(H<=2020,Sc=='Baseline',E%in%c('Energy','Process')) %>% 
+  filter(H%in%c(2010,2015,2020),Sc=='Baseline',E%in%c('Energy','Process')) %>% 
   ggplot() +
   geom_bar(aes(x=H,y=vq_l/1000,fill=J2),stat='identity') +
   geom_point(data=emission_historical,aes(x=H,y=TOTAL/1000),color='indianred2',fill='white',shape=21,size=3,stroke=1) +
   scale_fill_manual(values=c('lightsteelblue','lightsalmon','darkolivegreen2'),
-                    guide=guide_legend(ncol=2)) +
+                    guide=guide_legend(ncol=1)) +
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
   labs(y=expression(paste('Direct ',{CO[2]},' emissions (Gt-',{CO[2]},'  ',{yr^-1},')'))) +
   MyTheme +
-  theme(legend.position = 'bottom',
+  theme(legend.position = 'right',
         strip.text.x = element_blank(),
         strip.text.y = element_blank())
 plot(Fig2a)
 ggsave(paste0(odir,'Fig2a.png'),width=5,height=3.5,Fig2a)
 
 Fig2b <- VE1 %>%
-  filter(H<=2020,Sc=='Baseline',E%in%c('Energy','Electricity (indirect)')) %>% 
+  filter(H%in%c(2010,2015,2020),Sc=='Baseline',E%in%c('Energy','Electricity (indirect)')) %>% 
   mutate(K2=recode(K2,
                    'Oil product (Ethane)'='Oil',
                    'Oil product'='Oil',
@@ -511,7 +511,7 @@ Fig2b <- VE1 %>%
   ggplot() +
   geom_bar(aes(x=H,y=ve_l/1000,fill=K2),stat='identity') +
   geom_point(data=proene_historical,aes(x=H,y=value),color='indianred1',fill='white',shape=21,size=3,stroke=1) +
-  scale_fill_manual(guide=guide_legend(ncol=2),
+  scale_fill_manual(guide=guide_legend(ncol=1),
                     values=c('lightsteelblue',
                              'lightgoldenrod',
                              'sandybrown',
@@ -519,7 +519,7 @@ Fig2b <- VE1 %>%
   facet_grid(cols=vars(cpol),rows=vars(techpol)) +
   labs(y=expression(paste('Process energy consumption (EJ ',{yr^-1},')'))) +
   MyTheme +
-  theme(legend.position = 'bottom',
+  theme(legend.position = 'right',
         strip.text.x = element_blank(),
         strip.text.y = element_blank())
 plot(Fig2b)
@@ -905,10 +905,13 @@ Fig5a <- df5 %>%
   group_by(Sc,Y5) %>% 
   summarise(vq_l=sum(vq_l)) %>% 
   left_join(list_Sc) %>% 
+  mutate(techpol=as.character(techpol)) %>% 
   mutate(techpol=recode(techpol,'Biofueloff'='limBio')) %>% 
   mutate(cpol=str_remove(cpol,'NPi')) %>% 
   mutate(cpol=case_when(cpol!='Baseline'~paste0(cpol,'C'),
-                        TRUE~cpol)) %>% 
+                        TRUE~cpol),
+         techpol=case_when(techpol=='limCCS'~'NoCCS',
+                           TRUE~techpol)) %>% 
   mutate(cpol=factor(cpol,levels=c('Baseline','1000C','700C','500C')),
          techpol=factor(techpol,levels=c('Default','NoCCS','limBio'))) %>% 
   ggplot() +
@@ -931,10 +934,13 @@ Fig5b <- df5 %>%
   group_by(Sc,Y5) %>% 
   summarise(vq_l=sum(vq_l)) %>% 
   left_join(list_Sc) %>% 
+  mutate(techpol=as.character(techpol)) %>% 
   mutate(techpol=recode(techpol,'Biofueloff'='limBio')) %>% 
   mutate(cpol=str_remove(cpol,'NPi')) %>% 
   mutate(cpol=case_when(cpol!='Baseline'~paste0(cpol,'C'),
-                        TRUE~cpol)) %>% 
+                        TRUE~cpol),
+         techpol=case_when(techpol=='limCCS'~'NoCCS',
+                           TRUE~techpol)) %>% 
   mutate(cpol=factor(cpol,levels=c('Baseline','1000C','700C','500C')),
          techpol=factor(techpol,levels=c('Default','NoCCS','limBio'))) %>% 
   ggplot() +
@@ -956,45 +962,76 @@ Fig5 <- Fig5a + Fig5b + plot_layout(ncol=1)
 plot(Fig5)
 ggsave(paste0(odir,'Fig5.png'),Fig5,width=4.5,height=8)
 
-# Figure 5 Emission --------------------------------------------------------
+# # Figure 5 Emission --------------------------------------------------------
+# 
+# # Production
+# df6.1 <- vx_l %>%
+#   filter(Sc=='Baseline',L%in%c('NENHVC','NENMOH','NENNH3','NENNH3U')) %>% 
+#   mutate(L=case_when(str_detect(L,'HVC')~'HVC',
+#                      str_detect(L,'MOH')~'Methanol',
+#                      str_detect(L,'NH3')~'Ammonia')) %>% 
+#   group_by(L,Sc,H) %>% 
+#   summarise(vx_l=sum(vx_l)) %>% 
+#   group_by(L,Sc) %>% 
+#   complete(H=c(2005:2050)) %>% 
+#   ungroup() %>% 
+#   mutate(Y5=5*floor(H/5-401)+2005) %>%
+#   replace_na(list(vx_l=0)) %>% 
+#   group_by(L,Sc,Y5) %>% 
+#   summarise(vx_l=mean(vx_l)) %>% 
+#   rename(J2=L)
+# 
+# # Total -product
+# df6.2 <- VQ5 %>% 
+#   filter(K!='CRN',E!='CCUS') %>% 
+#   group_by(Sc,Y5,E,J2) %>% 
+#   summarise(vq_l=sum(vq_l))
+# 
+# Fig6 <- df6.2 %>%
+#   left_join(df6.1) %>% 
+#   mutate(vq_vx=vq_l/vx_l) %>% 
+#   left_join(list_Sc) %>% 
+#   mutate(techpol=recode(techpol,'Biofueloff'='limBio')) %>% 
+#   mutate(cpol=str_remove(cpol,'NPi')) %>% 
+#   mutate(cpol=case_when(cpol!='Baseline'~paste0(cpol,'C'),
+#                         TRUE~cpol)) %>% 
+#   mutate(cpol=factor(cpol,levels=c('Baseline','1000C','700C','500C')),
+#          techpol=factor(techpol,levels=c('Default','lim','limBio'))) %>% 
+#   filter(J2=='HVC') %>% 
+#   ggplot() +
+#   geom_area(aes(x=Y5,y=vq_l,fill=E),stat='identity') +
+#   facet_grid(cols=vars(cpol),rows=vars(techpol))
+# plot(Fig6)  
 
-# Production
-df6.1 <- vx_l %>%
-  filter(Sc=='Baseline',L%in%c('NENHVC','NENMOH','NENNH3','NENNH3U')) %>% 
-  mutate(L=case_when(str_detect(L,'HVC')~'HVC',
-                     str_detect(L,'MOH')~'Methanol',
-                     str_detect(L,'NH3')~'Ammonia')) %>% 
-  group_by(L,Sc,H) %>% 
-  summarise(vx_l=sum(vx_l)) %>% 
-  group_by(L,Sc) %>% 
-  complete(H=c(2005:2050)) %>% 
-  ungroup() %>% 
-  mutate(Y5=5*floor(H/5-401)+2005) %>%
-  replace_na(list(vx_l=0)) %>% 
-  group_by(L,Sc,Y5) %>% 
-  summarise(vx_l=mean(vx_l)) %>% 
-  rename(J2=L)
+# Figure 6 Cost -----------------------------------------------------------
 
-# Total -product
-df6.2 <- VQ5 %>% 
-  filter(K!='CRN',E!='CCUS') %>% 
-  group_by(Sc,Y5,E,J2) %>% 
-  summarise(vq_l=sum(vq_l))
+# Total
+df6 <- rgdx.param(paste0(ddir2,'merged_output.gdx'),'iamc_gdx') %>% 
+  filter(Sr=='World',Sv=='Prc_Car',Sc!='NPi500_limCCS')
 
-Fig6 <- df6.2 %>%
-  left_join(df6.1) %>% 
-  mutate(vq_vx=vq_l/vx_l) %>% 
+
+Fig6a <- df6 %>% 
   left_join(list_Sc) %>% 
+  mutate(techpol=as.character(techpol)) %>% 
   mutate(techpol=recode(techpol,'Biofueloff'='limBio')) %>% 
   mutate(cpol=str_remove(cpol,'NPi')) %>% 
   mutate(cpol=case_when(cpol!='Baseline'~paste0(cpol,'C'),
-                        TRUE~cpol)) %>% 
+                        TRUE~cpol),
+         techpol=case_when(techpol=='limCCS'~'NoCCS',
+                           TRUE~techpol)) %>% 
   mutate(cpol=factor(cpol,levels=c('Baseline','1000C','700C','500C')),
-         techpol=factor(techpol,levels=c('Default','lim','limBio'))) %>% 
-  filter(J2=='HVC') %>% 
+         techpol=factor(techpol,levels=c('Default','NoCCS','limBio'))) %>% 
   ggplot() +
-  geom_area(aes(x=Y5,y=vq_l,fill=E),stat='identity') +
-  facet_grid(cols=vars(cpol),rows=vars(techpol))
-plot(Fig6)  
-
+  geom_line(aes(x=Y5,y=iamc_gdx,color=techpol,group=Sc,linetype=cpol),size=0.5) +
+  geom_point(aes(x=Y5,y=iamc_gdx,color=techpol,shape=cpol),size=1.5,stroke=1,fill='white') +
+  scale_color_manual(values=c('indianred2','palegreen3','deepskyblue3'),guide=guide_legend(ncol=2)) +
+  scale_linetype_manual(values=c('solid','solid','solid'),guide=guide_legend(ncol=2)) +
+  scale_shape_manual(values=c(22,21,24)) +
+  scale_y_continuous(limits=c(0,NA)) +
+  labs(y=expression(paste('Carbon prices (US$ t-',{CO[2]^-1},')'))) +
+  MyTheme +
+  theme(legend.position='bottom',
+        legend.text = element_text(size = 10))
+plot(Fig6a)
+ggsave(paste0(odir,'Fig6a.png'),Fig6a,width=4.5,height=4.5)
 
