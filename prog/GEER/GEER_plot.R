@@ -441,19 +441,19 @@ MyTheme <- theme_bw() +
 
 # Figure 1 Emission -------------------------------------------------------
 
-Fig1 <- rgdx.param(paste0(ddir2,'merged_output.gdx'),'data_all') %>% 
+Fig1 <- rgdx.param(paste0(ddir2,'merged_output.gdx'),'iamc_gdx') %>% 
   filter(Sv%in%c('Emi_CO2_Ene_and_Ind_Pro'),Sr=='World',Sc%in%c('Baseline','NPi1000','NPi700','NPi500')) %>% 
   mutate(across(where(is.factor),~as.character(.))) %>% 
   mutate(Sc=str_remove(Sc,'NPi')) %>% 
   mutate(Sc=case_when(Sc!='Baseline'~paste0(Sc,'C'),
                         TRUE~Sc)) %>% 
   mutate(Sc=factor(Sc,levels=c('Baseline','1000C','700C','500C'))) %>% 
-  mutate(Sy=as.numeric(Sy))
+  mutate(Y5=as.numeric(Y5))
 
 g_Fig1 <- Fig1 %>% 
   ggplot() +
-  geom_path(aes(x=Sy,y=data_all/1000,linetype=Sc)) +
-  labs(y=expression(paste({CO[2]},' emissions (Gt',{CO[2]},'  ',{yr^-1},')'))) +
+  geom_path(aes(x=Y5,y=iamc_gdx/1000,linetype=Sc)) +
+  labs(y=expression(paste({CO[2]},' emissions (Gt-',{CO[2]},'  ',{yr^-1},')'))) +
   scale_y_continuous(limits=c(0,NA)) +
   scale_linetype_manual(values=c('dotted','longdash','twodash','solid')) +
   MyTheme +
@@ -858,7 +858,7 @@ Fig4.3 <- Fig4.2 %>%
                              'grey60')) +
   facet_wrap(vars(cpol),nrow=1) +
   labs(y=expression(paste('Feedstock energy (EJ ',{yr^-1},')')),
-       subtitle='Default') +
+       title='a') +
   MyTheme +
   theme(legend.position = 'none')
 
@@ -875,10 +875,10 @@ Fig4.4 <- Fig4.2 %>%
                     values=c('lightsteelblue',
                              'darkolivegreen2',
                              'grey60')) +
-  scale_y_continuous(position='right') +
+  scale_y_continuous(position='left') +
   facet_wrap(vars(cpol),nrow=1) +
   labs(y=expression(paste('Share in feedstock energy (%)')),
-       subtitle='2050') +
+       title='b') +
   MyTheme +
   theme(legend.position = 'none',
         axis.title.y=element_text(size = 11,margin = unit(c(t = 0, r = 0.3, b = 0, l = 0), "cm")))
@@ -921,7 +921,7 @@ Fig5a <- df5 %>%
   scale_linetype_manual(values=c('dotted','solid','solid','solid')) +
   scale_shape_manual(values=c(23,22,21,24)) +
   scale_y_continuous(limits=c(0,NA)) +
-  labs(y=expression(paste('Direct ',{CO[2]},' emissions (Gt',{CO[2]},'  ',{yr^-1},')')),
+  labs(y=expression(paste('Direct ',{CO[2]},' emissions (Gt-',{CO[2]},'  ',{yr^-1},')')),
        subtitle='a') +
   MyTheme +
   theme(legend.position='none',
@@ -950,7 +950,7 @@ Fig5b <- df5 %>%
   scale_linetype_manual(values=c('dotted','solid','solid','solid'),guide=guide_legend(nrow=2)) +
   scale_shape_manual(values=c(23,22,21,24)) +
   scale_y_continuous(limits=c(0,NA)) +
-  labs(y=expression(paste('Indirect ',{CO[2]},' emissions (Gt',{CO[2]},'  ',{yr^-1},')')),
+  labs(y=expression(paste('Indirect ',{CO[2]},' emissions (Gt-',{CO[2]},'  ',{yr^-1},')')),
        subtitle = 'b') +
   MyTheme +
   theme(legend.position='bottom',
